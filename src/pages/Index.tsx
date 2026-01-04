@@ -1,13 +1,34 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { AnimatePresence, motion } from 'framer-motion';
+import { useAssistantStore } from '@/store/useAssistantStore';
+import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow';
+import { MainLayout } from '@/components/layout/MainLayout';
 
 const Index = () => {
+  const { onboardingComplete } = useAssistantStore();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
-    </div>
+    <AnimatePresence mode="wait">
+      {!onboardingComplete ? (
+        <motion.div
+          key="onboarding"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          transition={{ duration: 0.5 }}
+        >
+          <OnboardingFlow />
+        </motion.div>
+      ) : (
+        <motion.div
+          key="main"
+          initial={{ opacity: 0, scale: 1.02 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          <MainLayout />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 
