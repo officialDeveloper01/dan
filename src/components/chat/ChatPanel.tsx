@@ -1,14 +1,19 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAssistantStore } from '@/store/useAssistantStore';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { MessageCircle } from 'lucide-react';
-import { generateMockResponse } from '@/lib/mockResponses';
+import { toast } from '@/hooks/use-toast';
+
+const API_URL = 'http://localhost:8000/chat';
 
 export function ChatPanel() {
   const { messages, addMessage, isTyping, setIsTyping, assistantName, character } = useAssistantStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [displayedContent, setDisplayedContent] = useState<string>('');
+  const [fullContent, setFullContent] = useState<string>('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -16,20 +21,89 @@ export function ChatPanel() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping]);
+  }, [messages, isTyping, displayedContent]);
+
+  // Streaming effect: reveal characters one by one
+  useEffect(() => {
+    if (!streamingMessageId || displayedContent.length >= fullContent.length) {
+      if (streamingMessageId && displayedContent.length >= fullContent.length) {
+        setStreamingMessageId(null);
+        setDisplayedContent('');
+        setFullContent('');
+      }
+      return;
+    }
+
+    const charDelay = character.response_length === 'SHORT' ? 15 : character.response_length === 'MEDIUM' ? 12 : 10;
+    
+    const timer = setTimeout(() => {
+      setDisplayedContent(fullContent.slice(0, displayedContent.length + 1));
+    }, charDelay);
+
+    return () => clearTimeout(timer);
+  }, [streamingMessageId, displayedContent, fullContent, character.response_length]);
 
   const handleSend = async (content: string) => {
     addMessage({ role: 'user', content });
     setIsTyping(true);
 
-    // Simulate typing delay based on response length setting
-    const delay = character.response_length === 'SHORT' ? 1000 : character.response_length === 'MEDIUM' ? 1500 : 2000;
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          assistant_name: assistantName,
+          character: {
+            assistant_style: character.assistant_style,
+            tone: character.tone,
+            honesty_level: character.honesty_level,
+            emotional_expression: character.emotional_expression,
+            assertiveness: character.assertiveness,
+            response_length: character.response_length,
+          },
+          message: content,
+        }),
+      });
 
-    setTimeout(() => {
-      const response = generateMockResponse(content, character);
-      addMessage({ role: 'assistant', content: response });
+      if (!response.ok) {
+        throw new Error('Backend request failed');
+      }
+
+      const data = await response.json();
+      const reply = data.reply;
+
+      // Add message with empty content initially for streaming effect
+      const messageId = crypto.randomUUID();
+      addMessage({ role: 'assistant', content: reply });
+      
+      // Start streaming effect
+      setFullContent(reply);
+      setDisplayedContent('');
+      setStreamingMessageId(messageId);
       setIsTyping(false);
-    }, delay);
+    } catch (error) {
+      setIsTyping(false);
+      toast({
+        title: "Connection Error",
+        description: "Could not reach D.A.N backend. Please ensure the server is running.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Get the message content to display (with streaming effect for latest assistant message)
+  const getDisplayContent = (message: typeof messages[0], index: number) => {
+    const isLastAssistantMessage = 
+      message.role === 'assistant' && 
+      index === messages.length - 1 && 
+      streamingMessageId;
+    
+    if (isLastAssistantMessage) {
+      return displayedContent + (displayedContent.length < fullContent.length ? '▌' : '');
+    }
+    return message.content;
   };
 
   return (
@@ -68,10 +142,10 @@ export function ChatPanel() {
         ) : (
           <>
             <AnimatePresence mode="popLayout">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <ChatMessage
                   key={message.id}
-                  message={message}
+                  message={{ ...message, content: getDisplayContent(message, index) }}
                   assistantName={assistantName}
                 />
               ))}
@@ -85,7 +159,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input area */}
-      <ChatInput onSend={handleSend} disabled={isTyping} />
+      <ChatInput onSend={handleSend} disabled={isTyping || !!streamingMessageId} />
     </div>
   );
 }
